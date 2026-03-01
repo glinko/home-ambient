@@ -32,57 +32,70 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         setContentView(R.layout.activity_main)
         surface = findViewById(R.id.cameraSurface)
         status = findViewById(R.id.statusText)
-        surface.holder.addCallback(this)
 
-        // Legacy Camera API compatibility hint for very old devices/ROMs
+        val holder = surface.holder
+        holder.addCallback(this)
         @Suppress("DEPRECATION")
-        surface.holder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS)
+        holder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS)
 
         val cams = try { Camera.getNumberOfCameras() } catch (_: Exception) { -1 }
         status.text = "Legacy agent ready | sdk=${Build.VERSION.SDK_INT} | cams=$cams"
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
+        openAndStartCamera(holder, "surfaceCreated")
+    }
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        // On older Kindle/Cyanogen devices preview often starts only after surfaceChanged
+        openAndStartCamera(holder, "surfaceChanged ${width}x${height}")
+    }
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        stopCamera()
+    }
+
+    private fun openAndStartCamera(holder: SurfaceHolder, stage: String) {
         try {
-            val cams = Camera.getNumberOfCameras()
-            if (cams <= 0) {
-                status.text = "Camera error: no cameras detected"
-                return
+            if (camera == null) {
+                val cams = Camera.getNumberOfCameras()
+                if (cams <= 0) {
+                    status.text = "Camera error: no cameras detected"
+                    return
+                }
+                val backId = findBackCameraId()
+                camera = if (backId >= 0) Camera.open(backId) else Camera.open()
             }
 
-            val backId = findBackCameraId()
-            camera = if (backId >= 0) Camera.open(backId) else Camera.open()
-
             camera?.apply {
-                try {
-                    setDisplayOrientation(90)
-                } catch (_: Exception) {}
+                stopPreviewSafely()
+                try { setPreviewCallback(null) } catch (_: Exception) {}
 
                 try {
                     val p = parameters
-                    val size = p.supportedPreviewSizes?.firstOrNull()
-                    if (size != null) {
-                        p.setPreviewSize(size.width, size.height)
+                    p.previewFormat = android.graphics.ImageFormat.NV21
+                    val preferred = pickPreviewSize(p.supportedPreviewSizes)
+                    if (preferred != null) p.setPreviewSize(preferred.width, preferred.height)
+                    val focusModes = p.supportedFocusModes ?: emptyList()
+                    if (focusModes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
+                        p.focusMode = Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO
+                    } else if (focusModes.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
+                        p.focusMode = Camera.Parameters.FOCUS_MODE_AUTO
                     }
                     parameters = p
                 } catch (_: Exception) {}
 
+                try { setDisplayOrientation(90) } catch (_: Exception) {}
                 setPreviewDisplay(holder)
                 setPreviewCallback(this@MainActivity)
                 startPreview()
             }
 
-            val info = if (backId >= 0) "back=$backId" else "default camera"
-            status.text = "Camera started ($info)"
+            val p = camera?.parameters
+            status.text = "Camera started ($stage) | ${p?.previewSize?.width}x${p?.previewSize?.height}"
         } catch (e: Throwable) {
-            status.text = formatError("camera_start", e)
+            status.text = formatError("camera_start/$stage", e)
         }
-    }
-
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-        stopCamera()
     }
 
     override fun onPreviewFrame(data: ByteArray?, camera: Camera?) {
@@ -129,13 +142,23 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                 }
                 OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }
                 val code = conn.responseCode
-                conn.inputStream.close()
-                conn.disconnect()
+                conn.inputStream.close(); conn.disconnect()
                 runOnUiThread { status.text = "Motion sent OK (HTTP $code)" }
             } catch (e: Throwable) {
                 runOnUiThread { status.text = formatError("send_event", e) }
             }
         }
+    }
+
+    private fun pickPreviewSize(sizes: List<Camera.Size>?): Camera.Size? {
+        if (sizes.isNullOrEmpty()) return null
+        return sizes
+            .sortedBy { kotlin.math.abs(it.width * it.height - 640 * 480) }
+            .firstOrNull()
+    }
+
+    private fun stopPreviewSafely() {
+        try { camera?.stopPreview() } catch (_: Exception) {}
     }
 
     private fun stopCamera() {
