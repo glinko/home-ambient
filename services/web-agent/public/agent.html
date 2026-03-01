@@ -2,22 +2,62 @@
 <html><head>
 <meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Home Ambient Web Agent</title>
-<style>body{margin:0;background:#111;color:#eee;font-family:Arial,sans-serif}#bar{position:fixed;top:0;left:0;right:0;background:#000a;padding:8px;font-size:14px;z-index:2}#video{width:100vw;height:100vh;object-fit:cover;background:#000}</style>
+<style>
+  body{margin:0;background:#111;color:#eee;font-family:Arial,sans-serif}
+  #bar{position:fixed;top:0;left:0;right:0;background:#000a;padding:8px;font-size:14px;z-index:3;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  #status{min-width:220px}
+  #video{width:100vw;height:100vh;object-fit:cover;background:#000}
+  button,select{background:#222;color:#eee;border:1px solid #666;border-radius:6px;padding:6px 10px;font-size:13px}
+</style>
 </head><body>
-<div id="bar">Initializing...</div>
+<div id="bar">
+  <span id="status">Initializing...</span>
+  <button id="switchBtn" type="button">Switch camera</button>
+  <select id="cameraSelect"></select>
+</div>
 <video id="video" autoplay playsinline muted></video>
 <canvas id="work" width="320" height="240" style="display:none"></canvas>
 <script>(function(){
 var qs=new URLSearchParams(location.search);
 var device=qs.get('device')||'web-agent-unknown';
-var ingest=qs.get('ingest')||'http://192.168.88.50:8070/v1/events';
-var bar=document.getElementById('bar'),video=document.getElementById('video'),canvas=document.getElementById('work'),ctx=canvas.getContext('2d');
+var ingest=qs.get('ingest')||(location.origin + '/ingest/v1/events');
+var preferredFacing=(qs.get('facing')||'environment');
+
+var statusEl=document.getElementById('status');
+var switchBtn=document.getElementById('switchBtn');
+var cameraSelect=document.getElementById('cameraSelect');
+var video=document.getElementById('video');
+var canvas=document.getElementById('work');
+var ctx=canvas.getContext('2d');
+
 var prev=null,frameCount=0,lastMotionSent=0,lastHeartbeat=0;
-function log(t){bar.textContent=t;}
-function postEvent(type,motion){
- var payload={id:'evt-'+Math.random().toString(36).slice(2)+Date.now(),device_id:device,ts:new Date().toISOString(),motion_score:motion,metadata:{source:'web-agent',type:type,frames:frameCount}};
+var currentStream=null,cameras=[],currentIndex=0,analyzeTimer=null;
+
+function log(t){statusEl.textContent=t;}
+function stopStream(){
+  if(currentStream){
+    (currentStream.getTracks()||[]).forEach(function(t){ try{t.stop();}catch(_e){} });
+    currentStream=null;
+  }
+}
+function postEvent(type,motion,extra){
+ var payload={
+   id:'evt-'+Math.random().toString(36).slice(2)+Date.now(),
+   device_id:device,
+   ts:new Date().toISOString(),
+   motion_score:motion,
+   metadata:Object.assign({source:'web-agent',type:type,frames:frameCount,camera_index:currentIndex,camera_count:cameras.length}, extra||{})
+ };
  var xhr=new XMLHttpRequest(); xhr.open('POST',ingest,true); xhr.setRequestHeader('Content-Type','application/json');
- xhr.onreadystatechange=function(){if(xhr.readyState===4){if(xhr.status>=200&&xhr.status<300){log('ok '+type+' frames='+frameCount+' motion='+motion.toFixed(3));}else{log('send fail HTTP '+xhr.status+' type='+type);}}};
+ xhr.onreadystatechange=function(){
+   if(xhr.readyState===4){
+     if(xhr.status>=200&&xhr.status<300){
+       log('ok '+type+' cam='+(currentIndex+1)+'/'+(cameras.length||1)+' frames='+frameCount+' motion='+motion.toFixed(3));
+     }else{
+       log('send fail HTTP '+xhr.status+' type='+type);
+     }
+   }
+ };
  xhr.send(JSON.stringify(payload));
 }
 function analyze(){
@@ -26,12 +66,103 @@ function analyze(){
  var d=ctx.getImageData(0,0,canvas.width,canvas.height).data,sum=0,count=0;
  for(var i=0;i<d.length;i+=16){sum+=d[i];count++;}
  var avg=count?sum/count:0,motion=prev===null?0:Math.abs(avg-prev)/255; prev=avg; frameCount++;
- var now=Date.now(); if(motion>0.05&&now-lastMotionSent>5000){lastMotionSent=now;postEvent('motion',motion);} if(now-lastHeartbeat>30000){lastHeartbeat=now;postEvent('heartbeat',motion);}
- if(frameCount%15===0)log('watching '+device+' frames='+frameCount+' motion='+motion.toFixed(3));
+ var now=Date.now();
+ if(motion>0.05&&now-lastMotionSent>5000){lastMotionSent=now;postEvent('motion',motion);} 
+ if(now-lastHeartbeat>30000){lastHeartbeat=now;postEvent('heartbeat',motion);} 
+ if(frameCount%15===0)log('watching '+device+' cam='+(currentIndex+1)+'/'+(cameras.length||1)+' frames='+frameCount+' motion='+motion.toFixed(3));
 }
-function startStream(stream){video.srcObject=stream; log('camera started for '+device); setInterval(analyze,1000);}
+function fillSelect(){
+  cameraSelect.innerHTML='';
+  cameras.forEach(function(c,i){
+    var opt=document.createElement('option');
+    var label=c.label||('camera '+(i+1));
+    opt.value=String(i); opt.textContent=(i===currentIndex?'* ':'')+label;
+    cameraSelect.appendChild(opt);
+  });
+  cameraSelect.value=String(currentIndex);
+}
+function startAnalyzeLoop(){
+  if(analyzeTimer) clearInterval(analyzeTimer);
+  analyzeTimer=setInterval(analyze,1000);
+}
+function startStream(constraints,extraMeta){
+  var gum=(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)
+    ? function(c){return navigator.mediaDevices.getUserMedia(c);} 
+    : function(c){return new Promise(function(res,rej){var g=navigator.getUserMedia||navigator.webkitGetUserMedia||navigator.mozGetUserMedia; if(!g)return rej(new Error('getUserMedia not supported')); g.call(navigator,c,res,rej);});};
+
+  return gum(constraints).then(function(stream){
+    stopStream();
+    currentStream=stream;
+    video.srcObject=stream;
+    prev=null;
+    startAnalyzeLoop();
+    var camLabel=(cameras[currentIndex]&&cameras[currentIndex].label)?cameras[currentIndex].label:('camera '+(currentIndex+1));
+    log('camera started: '+camLabel+' | '+device);
+    postEvent('camera_started',0,extraMeta||{});
+  });
+}
 function fail(err){log('camera error: '+((err&&(err.message||err.name))||'unknown'));}
-var gum=(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)?function(c){return navigator.mediaDevices.getUserMedia(c);} : function(c){return new Promise(function(res,rej){var g=navigator.getUserMedia||navigator.webkitGetUserMedia||navigator.mozGetUserMedia; if(!g)return rej(new Error('getUserMedia not supported')); g.call(navigator,c,res,rej);});};
-gum({video:{facingMode:'environment'},audio:false}).then(startStream).catch(function(){gum({video:true,audio:false}).then(startStream).catch(fail);});
+
+function enumerateCameras(){
+  if(!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices)) return Promise.resolve([]);
+  return navigator.mediaDevices.enumerateDevices().then(function(devs){
+    cameras=devs.filter(function(d){return d.kind==='videoinput';});
+    fillSelect();
+    return cameras;
+  });
+}
+
+function openByIndex(index){
+  currentIndex=index;
+  fillSelect();
+  if(cameras[index] && cameras[index].deviceId){
+    return startStream({video:{deviceId:{exact:cameras[index].deviceId}},audio:false},{camera_label:cameras[index].label||''})
+      .catch(function(){
+        return startStream({video:true,audio:false},{fallback:true});
+      });
+  }
+  return startStream({video:true,audio:false},{fallback:true});
+}
+
+function initialStart(){
+  startStream({video:{facingMode:{ideal:preferredFacing}},audio:false},{initial_facing:preferredFacing})
+    .then(function(){ return enumerateCameras(); })
+    .then(function(){
+      if(cameras.length>1){
+        var target=-1;
+        for(var i=0;i<cameras.length;i++){
+          var lbl=(cameras[i].label||'').toLowerCase();
+          if(preferredFacing==='user' && (lbl.indexOf('front')>=0 || lbl.indexOf('user')>=0)) target=i;
+          if(preferredFacing!=='user' && (lbl.indexOf('back')>=0 || lbl.indexOf('rear')>=0 || lbl.indexOf('environment')>=0)) target=i;
+        }
+        if(target>=0){ currentIndex=target; fillSelect(); }
+      }
+    })
+    .catch(function(){
+      startStream({video:true,audio:false},{fallback:true})
+        .then(function(){return enumerateCameras();})
+        .catch(fail);
+    });
+}
+
+switchBtn.addEventListener('click', function(){
+  if(!cameras.length){
+    enumerateCameras().then(function(){
+      if(!cameras.length){log('no camera list, trying default'); openByIndex(0).catch(fail); return;}
+      currentIndex=(currentIndex+1)%cameras.length;
+      openByIndex(currentIndex).catch(fail);
+    });
+    return;
+  }
+  currentIndex=(currentIndex+1)%cameras.length;
+  openByIndex(currentIndex).catch(fail);
+});
+
+cameraSelect.addEventListener('change', function(){
+  var i=parseInt(cameraSelect.value,10);
+  if(!isNaN(i)) openByIndex(i).catch(fail);
+});
+
+initialStart();
 })();</script>
 </body></html>
