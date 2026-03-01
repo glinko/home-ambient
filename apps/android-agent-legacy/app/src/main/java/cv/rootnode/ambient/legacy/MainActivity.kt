@@ -25,6 +25,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private var camera: Camera? = null
     private var prevAvg = -1.0
     private var lastSent = 0L
+    private var lastHeartbeatSent = 0L
     private var frameCount = 0
     private var lastFrameAt = 0L
     private val ingestUrl = "http://192.168.88.50:8070/v1/events"
@@ -143,16 +144,21 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             }
         }
 
-        if (motion > 0.07 && now - lastSent > 7000) {
+        if (motion > 0.04 && now - lastSent > 5000) {
             lastSent = now
             runOnUiThread { status.text = "Motion ${"%.3f".format(motion)} / sending" }
-            sendEvent(motion)
+            sendEvent(motion, "motion")
         }
 
         try { camera?.addCallbackBuffer(data) } catch (_: Exception) {}
+        // periodic heartbeat event so backend connectivity is always visible
+        if (now - lastHeartbeatSent > 30000) {
+            lastHeartbeatSent = now
+            sendEvent(motion, "heartbeat")
+        }
     }
 
-    private fun sendEvent(motion: Double) {
+    private fun sendEvent(motion: Double, type: String = "motion") {
         thread {
             try {
                 val payload = JSONObject().apply {
@@ -162,7 +168,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                     put("motion_score", motion)
                     put("metadata", JSONObject().apply {
                         put("source", "android-legacy")
-                        put("type", "motion")
+                        put("type", type)
                         put("frames", frameCount)
                         put("last_frame_age_ms", System.currentTimeMillis() - lastFrameAt)
                     })
