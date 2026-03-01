@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Home Ambient Web Agent</title>
+<style>body{margin:0;background:#111;color:#eee;font-family:Arial,sans-serif}#bar{position:fixed;top:0;left:0;right:0;background:#000a;padding:8px;font-size:14px;z-index:2}#video{width:100vw;height:100vh;object-fit:cover;background:#000}</style>
+</head><body>
+<div id="bar">Initializing...</div>
+<video id="video" autoplay playsinline muted></video>
+<canvas id="work" width="320" height="240" style="display:none"></canvas>
+<script>(function(){
+var qs=new URLSearchParams(location.search);
+var device=qs.get('device')||'web-agent-unknown';
+var ingest=qs.get('ingest')||'http://192.168.88.50:8070/v1/events';
+var bar=document.getElementById('bar'),video=document.getElementById('video'),canvas=document.getElementById('work'),ctx=canvas.getContext('2d');
+var prev=null,frameCount=0,lastMotionSent=0,lastHeartbeat=0;
+function log(t){bar.textContent=t;}
+function postEvent(type,motion){
+ var payload={id:'evt-'+Math.random().toString(36).slice(2)+Date.now(),device_id:device,ts:new Date().toISOString(),motion_score:motion,metadata:{source:'web-agent',type:type,frames:frameCount}};
+ var xhr=new XMLHttpRequest(); xhr.open('POST',ingest,true); xhr.setRequestHeader('Content-Type','application/json');
+ xhr.onreadystatechange=function(){if(xhr.readyState===4){if(xhr.status>=200&&xhr.status<300){log('ok '+type+' frames='+frameCount+' motion='+motion.toFixed(3));}else{log('send fail HTTP '+xhr.status+' type='+type);}}};
+ xhr.send(JSON.stringify(payload));
+}
+function analyze(){
+ if(!video.videoWidth)return;
+ ctx.drawImage(video,0,0,canvas.width,canvas.height);
+ var d=ctx.getImageData(0,0,canvas.width,canvas.height).data,sum=0,count=0;
+ for(var i=0;i<d.length;i+=16){sum+=d[i];count++;}
+ var avg=count?sum/count:0,motion=prev===null?0:Math.abs(avg-prev)/255; prev=avg; frameCount++;
+ var now=Date.now(); if(motion>0.05&&now-lastMotionSent>5000){lastMotionSent=now;postEvent('motion',motion);} if(now-lastHeartbeat>30000){lastHeartbeat=now;postEvent('heartbeat',motion);}
+ if(frameCount%15===0)log('watching '+device+' frames='+frameCount+' motion='+motion.toFixed(3));
+}
+function startStream(stream){video.srcObject=stream; log('camera started for '+device); setInterval(analyze,1000);}
+function fail(err){log('camera error: '+((err&&(err.message||err.name))||'unknown'));}
+var gum=(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)?function(c){return navigator.mediaDevices.getUserMedia(c);} : function(c){return new Promise(function(res,rej){var g=navigator.getUserMedia||navigator.webkitGetUserMedia||navigator.mozGetUserMedia; if(!g)return rej(new Error('getUserMedia not supported')); g.call(navigator,c,res,rej);});};
+gum({video:{facingMode:'environment'},audio:false}).then(startStream).catch(function(){gum({video:true,audio:false}).then(startStream).catch(fail);});
+})();</script>
+</body></html>
