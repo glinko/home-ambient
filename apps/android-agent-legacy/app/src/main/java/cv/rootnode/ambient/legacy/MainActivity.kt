@@ -24,6 +24,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private var camera: Camera? = null
     private var prevAvg = -1.0
     private var lastSent = 0L
+    private var frameCount = 0
+    private var lastFrameAt = 0L
     private val ingestUrl = "http://192.168.88.50:8070/v1/events"
     private val deviceId = "android-kindle-legacy"
 
@@ -47,7 +49,6 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        // On older Kindle/Cyanogen devices preview often starts only after surfaceChanged
         openAndStartCamera(holder, "surfaceChanged ${width}x${height}")
     }
 
@@ -76,12 +77,6 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                     p.previewFormat = android.graphics.ImageFormat.NV21
                     val preferred = pickPreviewSize(p.supportedPreviewSizes)
                     if (preferred != null) p.setPreviewSize(preferred.width, preferred.height)
-                    val focusModes = p.supportedFocusModes ?: emptyList()
-                    if (focusModes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
-                        p.focusMode = Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO
-                    } else if (focusModes.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
-                        p.focusMode = Camera.Parameters.FOCUS_MODE_AUTO
-                    }
                     parameters = p
                 } catch (_: Exception) {}
 
@@ -92,7 +87,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             }
 
             val p = camera?.parameters
-            status.text = "Camera started ($stage) | ${p?.previewSize?.width}x${p?.previewSize?.height}"
+            status.text = "Camera started ($stage) | ${p?.previewSize?.width}x${p?.previewSize?.height} | wait frames..."
         } catch (e: Throwable) {
             status.text = formatError("camera_start/$stage", e)
         }
@@ -112,10 +107,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         val motion = if (prevAvg < 0) 0.0 else abs(avg - prevAvg) / 255.0
         prevAvg = avg
         val now = System.currentTimeMillis()
+        frameCount++
+        lastFrameAt = now
+
+        if (frameCount % 20 == 0) {
+            runOnUiThread {
+                status.text = "Frames:$frameCount luma=${"%.1f".format(avg)} motion=${"%.3f".format(motion)}"
+            }
+        }
 
         if (motion > 0.07 && now - lastSent > 7000) {
             lastSent = now
-            status.text = "Motion ${"%.3f".format(motion)} / sending"
+            runOnUiThread { status.text = "Motion ${"%.3f".format(motion)} / sending" }
             sendEvent(motion)
         }
     }
@@ -131,6 +134,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                     put("metadata", JSONObject().apply {
                         put("source", "android-legacy")
                         put("type", "motion")
+                        put("frames", frameCount)
                     })
                 }
                 val conn = (URL(ingestUrl).openConnection() as HttpURLConnection).apply {
@@ -152,9 +156,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
 
     private fun pickPreviewSize(sizes: List<Camera.Size>?): Camera.Size? {
         if (sizes.isNullOrEmpty()) return null
-        return sizes
-            .sortedBy { kotlin.math.abs(it.width * it.height - 640 * 480) }
-            .firstOrNull()
+        return sizes.sortedBy { kotlin.math.abs(it.width * it.height - 640 * 480) }.firstOrNull()
     }
 
     private fun stopPreviewSafely() {
