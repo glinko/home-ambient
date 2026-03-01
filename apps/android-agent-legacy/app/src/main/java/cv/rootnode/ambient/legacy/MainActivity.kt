@@ -1,6 +1,7 @@
 package cv.rootnode.ambient.legacy
 
 import android.app.Activity
+import android.graphics.ImageFormat
 import android.hardware.Camera
 import android.os.Build
 import android.os.Bundle
@@ -41,7 +42,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         holder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS)
 
         val cams = try { Camera.getNumberOfCameras() } catch (_: Exception) { -1 }
-        status.text = "Legacy agent ready | sdk=${Build.VERSION.SDK_INT} | cams=$cams"
+        status.text = "Legacy ready | sdk=${Build.VERSION.SDK_INT} | cams=$cams"
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
@@ -64,30 +65,56 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                     status.text = "Camera error: no cameras detected"
                     return
                 }
-                val backId = findBackCameraId()
-                camera = if (backId >= 0) Camera.open(backId) else Camera.open()
+                camera = try { Camera.open(0) } catch (_: Throwable) { Camera.open() }
             }
 
             camera?.apply {
                 stopPreviewSafely()
+                try { setPreviewCallbackWithBuffer(null) } catch (_: Exception) {}
                 try { setPreviewCallback(null) } catch (_: Exception) {}
 
-                try {
-                    val p = parameters
-                    p.previewFormat = android.graphics.ImageFormat.NV21
-                    val preferred = pickPreviewSize(p.supportedPreviewSizes)
-                    if (preferred != null) p.setPreviewSize(preferred.width, preferred.height)
-                    parameters = p
-                } catch (_: Exception) {}
+                val p = try { parameters } catch (_: Throwable) { null }
+                if (p != null) {
+                    try {
+                        p.previewFormat = ImageFormat.NV21
+                        val preferred = pickPreviewSize(p.supportedPreviewSizes)
+                        if (preferred != null) p.setPreviewSize(preferred.width, preferred.height)
+                        parameters = p
+                    } catch (_: Exception) {}
+                }
 
                 try { setDisplayOrientation(90) } catch (_: Exception) {}
                 setPreviewDisplay(holder)
-                setPreviewCallback(this@MainActivity)
+
+                val pp = try { parameters } catch (_: Throwable) { null }
+                val size = pp?.previewSize
+                val fmt = pp?.previewFormat ?: ImageFormat.NV21
+                if (size != null) {
+                    val bits = ImageFormat.getBitsPerPixel(fmt).coerceAtLeast(12)
+                    val bytes = size.width * size.height * bits / 8
+                    addCallbackBuffer(ByteArray(bytes))
+                    addCallbackBuffer(ByteArray(bytes))
+                    setPreviewCallbackWithBuffer(this@MainActivity)
+                } else {
+                    setPreviewCallback(this@MainActivity)
+                }
+
                 startPreview()
             }
 
-            val p = camera?.parameters
-            status.text = "Camera started ($stage) | ${p?.previewSize?.width}x${p?.previewSize?.height} | wait frames..."
+            val p2 = camera?.parameters
+            val ps = p2?.previewSize
+            status.text = "Camera started ($stage) | ${ps?.width}x${ps?.height} | wait frames..."
+
+            val snapshotFrames = frameCount
+            thread {
+                Thread.sleep(4000)
+                if (frameCount == snapshotFrames) {
+                    runOnUiThread {
+                        status.text = "ERR[preview] no frame callbacks after start (${stage})"
+                    }
+                }
+            }
         } catch (e: Throwable) {
             status.text = formatError("camera_start/$stage", e)
         }
@@ -121,6 +148,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             runOnUiThread { status.text = "Motion ${"%.3f".format(motion)} / sending" }
             sendEvent(motion)
         }
+
+        try { camera?.addCallbackBuffer(data) } catch (_: Exception) {}
     }
 
     private fun sendEvent(motion: Double) {
@@ -135,6 +164,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                         put("source", "android-legacy")
                         put("type", "motion")
                         put("frames", frameCount)
+                        put("last_frame_age_ms", System.currentTimeMillis() - lastFrameAt)
                     })
                 }
                 val conn = (URL(ingestUrl).openConnection() as HttpURLConnection).apply {
@@ -165,25 +195,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
 
     private fun stopCamera() {
         try {
+            camera?.setPreviewCallbackWithBuffer(null)
             camera?.setPreviewCallback(null)
             camera?.stopPreview()
             camera?.release()
         } catch (_: Exception) {
         } finally {
             camera = null
-        }
-    }
-
-    private fun findBackCameraId(): Int {
-        return try {
-            val info = Camera.CameraInfo()
-            for (i in 0 until Camera.getNumberOfCameras()) {
-                Camera.getCameraInfo(i, info)
-                if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) return i
-            }
-            -1
-        } catch (_: Exception) {
-            -1
         }
     }
 
