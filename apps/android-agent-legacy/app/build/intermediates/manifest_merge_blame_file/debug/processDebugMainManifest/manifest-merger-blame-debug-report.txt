@@ -1,0 +1,57 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="cv.rootnode.ambient.legacy"
+4    android:versionCode="1"
+5    android:versionName="0.1.0-legacy" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="19"
+9        android:targetSdkVersion="28" />
+10
+11    <uses-permission android:name="android.permission.CAMERA" />
+11-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:3:3-62
+11-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:3:20-60
+12    <uses-permission android:name="android.permission.INTERNET" />
+12-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:4:3-64
+12-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:4:20-62
+13    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+13-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:5:3-68
+13-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:5:20-66
+14
+15    <uses-feature
+15-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:6:3-81
+16        android:name="android.hardware.camera"
+16-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:6:17-55
+17        android:required="true" />
+17-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:6:56-79
+18
+19    <application
+19-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:7:3-14:17
+20        android:allowBackup="true"
+20-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:7:16-42
+21        android:debuggable="true"
+22        android:extractNativeLibs="true"
+23        android:label="Ambient Legacy"
+23-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:7:43-73
+24        android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" >
+24-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:7:74-138
+25        <activity
+25-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:8:5-13:16
+26            android:name="cv.rootnode.ambient.legacy.MainActivity"
+26-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:8:15-43
+27            android:exported="true" >
+27-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:8:44-67
+28            <intent-filter>
+28-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:9:7-12:23
+29                <action android:name="android.intent.action.MAIN" />
+29-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:10:9-60
+29-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:10:17-58
+30
+31                <category android:name="android.intent.category.LAUNCHER" />
+31-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:11:9-68
+31-->/home/alex/workspace/projects/home-ambient/apps/android-agent-legacy/app/src/main/AndroidManifest.xml:11:19-66
+32            </intent-filter>
+33        </activity>
+34    </application>
+35
+36</manifest>

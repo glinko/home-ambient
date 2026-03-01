@@ -1,0 +1,4 @@
+cv.rootnode.ambient.legacy:string/app_name = 0x7f030000
+cv.rootnode.ambient.legacy:layout/activity_main = 0x7f020000
+cv.rootnode.ambient.legacy:id/statusText = 0x7f010001
+cv.rootnode.ambient.legacy:id/cameraSurface = 0x7f010000
