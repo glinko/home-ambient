@@ -17,4 +17,5 @@ export PORT=8070
 nohup node src/server.js > /tmp/home-ambient-ingest.log 2>&1 &
 echo $! > /tmp/home-ambient-ingest.pid
 
-echo "Core started. Ingest: http://:8070/health"
+HOST_IP=$(hostname -I | awk {print })
+echo "Core started. Ingest: http://${HOST_IP}:8070/health"
